@@ -37,7 +37,114 @@ jobs:
           mkdir -p build
           for arch in "${!FILEMAP[@]}"; do
             debfile="${FILEMAP[$arch]}"
-            url="https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
+            url="https://grimler.se/termux-main/pool/main/v/vifm/$debfile"name: Build vifm zips
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # weekly
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VIFM_VERSION: 0.14.3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl xz-utils binutils tar zip dpkg gh
+
+      - name: Build arm64-v8a
+        run: |
+          debfile="vifm_${VIFM_VERSION}-1_aarch64.deb"
+          folder="${debfile%.deb}"  # remove .deb
+          mkdir -p "build/$folder"
+          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
+          dpkg-deb -x "build/$debfile" "build/$folder/"
+
+          if [ -d "build/$folder/data/data/com.termux" ]; then
+            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
+            rm -rf "build/$folder/data"
+          fi
+
+          cd "build/$folder"
+          zip -r "../../${folder}.zip" *
+          cd ../../
+
+      - name: Build armeabi-v7a
+        run: |
+          debfile="vifm_${VIFM_VERSION}-1_arm.deb"
+          folder="${debfile%.deb}"
+          mkdir -p "build/$folder"
+          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
+          dpkg-deb -x "build/$debfile" "build/$folder/"
+
+          if [ -d "build/$folder/data/data/com.termux" ]; then
+            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
+            rm -rf "build/$folder/data"
+          fi
+
+          cd "build/$folder"
+          zip -r "../../${folder}.zip" *
+          cd ../../
+
+      - name: Build x86
+        run: |
+          debfile="vifm_${VIFM_VERSION}-1_i686.deb"
+          folder="${debfile%.deb}"
+          mkdir -p "build/$folder"
+          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
+          dpkg-deb -x "build/$debfile" "build/$folder/"
+
+          if [ -d "build/$folder/data/data/com.termux" ]; then
+            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
+            rm -rf "build/$folder/data"
+          fi
+
+          cd "build/$folder"
+          zip -r "../../${folder}.zip" *
+          cd ../../
+
+      - name: Build x86_64
+        run: |
+          debfile="vifm_${VIFM_VERSION}-1_x86_64.deb"
+          folder="${debfile%.deb}"
+          mkdir -p "build/$folder"
+          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
+          dpkg-deb -x "build/$debfile" "build/$folder/"
+
+          if [ -d "build/$folder/data/data/com.termux" ]; then
+            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
+            rm -rf "build/$folder/data"
+          fi
+
+          cd "build/$folder"
+          zip -r "../../${folder}.zip" *
+          cd ../../
+
+      - name: Create releases
+        run: |
+          for zipfile in build/vifm_${VIFM_VERSION}-1_*.zip; do
+            echo "Creating release for $zipfile"
+            tag="${zipfile##*/}"  # get filename
+            tag="${tag%.zip}"     # remove .zip
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release $tag already exists, skipping."
+              continue
+            fi
+            gh release create "$tag" "$zipfile" --title "$tag" --notes "Automated release for $tag"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
             echo "Downloading $url"
             curl -L -f -o "build/$debfile" "$url" || { echo "Failed to download $debfile"; continue; }
 
