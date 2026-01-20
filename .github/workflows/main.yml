@@ -26,14 +26,14 @@ jobs:
       - name: Build arm64-v8a
         run: |
           debfile="vifm_${VIFM_VERSION}-1_aarch64.deb"
-          folder="${debfile%.deb}"  # remove .deb
+          folder="${debfile%.deb}"
           mkdir -p "build/$folder"
           curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
           dpkg-deb -x "build/$debfile" "build/$folder/"
 
           if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
-            rm -rf "build/$folder/data"
+            mv build/$folder/data/data/com.termux/* build/$folder/
+            rm -rf build/$folder/data
           fi
 
           cd "build/$folder"
@@ -49,8 +49,8 @@ jobs:
           dpkg-deb -x "build/$debfile" "build/$folder/"
 
           if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
-            rm -rf "build/$folder/data"
+            mv build/$folder/data/data/com.termux/* build/$folder/
+            rm -rf build/$folder/data
           fi
 
           cd "build/$folder"
@@ -66,8 +66,8 @@ jobs:
           dpkg-deb -x "build/$debfile" "build/$folder/"
 
           if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
-            rm -rf "build/$folder/data"
+            mv build/$folder/data/data/com.termux/* build/$folder/
+            rm -rf build/$folder/data
           fi
 
           cd "build/$folder"
@@ -83,8 +83,8 @@ jobs:
           dpkg-deb -x "build/$debfile" "build/$folder/"
 
           if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv "build/$folder/data/data/com.termux/"* "build/$folder/"
-            rm -rf "build/$folder/data"
+            mv build/$folder/data/data/com.termux/* build/$folder/
+            rm -rf build/$folder/data
           fi
 
           cd "build/$folder"
@@ -93,15 +93,32 @@ jobs:
 
       - name: Create releases
         run: |
-          for zipfile in build/vifm_${VIFM_VERSION}-1_*.zip; do
+          # Explicit list of zip files
+          zipfiles=(
+            "build/vifm_${VIFM_VERSION}-1_aarch64.zip"
+            "build/vifm_${VIFM_VERSION}-1_arm.zip"
+            "build/vifm_${VIFM_VERSION}-1_i686.zip"
+            "build/vifm_${VIFM_VERSION}-1_x86_64.zip"
+          )
+
+          for zipfile in "${zipfiles[@]}"; do
             echo "Creating release for $zipfile"
-            tag="${zipfile##*/}"  # get filename
-            tag="${tag%.zip}"     # remove .zip
+
+            if [ ! -f "$zipfile" ]; then
+              echo "Zip file $zipfile not found, skipping."
+              continue
+            fi
+
+            tag=$(basename "$zipfile" .zip)
+
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release $tag already exists, skipping."
               continue
             fi
-            gh release create "$tag" "$zipfile" --title "$tag" --notes "Automated release for $tag"
+
+            gh release create "$tag" "$zipfile" \
+              --title "$tag" \
+              --notes "Automated release for $tag"
           done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
