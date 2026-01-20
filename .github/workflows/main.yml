@@ -1,18 +1,64 @@
 name: Build vifm zips
 
-on: 
-    schedule:
-      - cron: '0 0 ** 0'
-    workflow_dispatch:
+on:
+  schedule:
+    - cron: '0 0 * * 0' # every Sunday at 00:00 UTC
+  workflow_dispatch: # allows manual trigger
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      ARCHS: "arm64 armeabi-v7a x86_64 x86"
+      ARCHS: "arm64-v8a armeabi-v7a x86_64 x86"
 
     steps:
       - name: Checkout repository
-        uses: actions/ checkout@v3
-        
-    
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq xz-utils ar tar zip
+
+      - name: Get latest vifm version
+        id: get_version
+        run: |
+          latest=$(curl -s https://grimler.se/termux-main/pool/main/v/vifm/ | \
+            grep -Po 'vifm_\K[0-9]+\.[0-9]+\.[0-9]+(?=-1_arm\.deb)' | sort -V | tail -1)
+          echo "Latest version: $latest"
+          echo "version=$latest" >> $GITHUB_OUTPUT
+
+      - name: Download and prepare packages
+        run: |
+          mkdir -p build
+          for arch in $ARCHS; do
+            # Construct URL
+            url="https://grimler.se/termux-main/pool/main/v/vifm/vifm_${{ steps.get_version.outputs.version }}-1_${arch}.deb"
+            echo "Downloading $url"
+            curl -L -o build/vifm_${arch}.deb "$url"
+
+            # Extract .deb
+            mkdir -p build/${arch}
+            dpkg-deb -x build/vifm_${arch}.deb build/${arch}/
+
+            # Remove /data/data/com.termux prefix
+            if [ -d build/${arch}/data/data/com.termux ]; then
+              mv build/${arch}/data/data/com.termux/* build/${arch}/
+              rm -rf build/${arch}/data
+            fi
+
+            # Zip the folder
+            cd build/${arch}
+            zip -r ../../vifm_${arch}_${{ steps.get_version.outputs.version }}.zip *
+            cd ../../
+          done
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: "v${{ steps.get_version.outputs.version }}"
+          release_name: "vifm ${{ steps.get_version.outputs.version }}"
+          body: "Automated release of vifm version ${{ steps.get_version.outputs.version }}"
+          files: build/*.zip
+          draft: false
+          prerelease: false
