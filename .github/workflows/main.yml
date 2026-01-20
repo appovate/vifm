@@ -3,13 +3,14 @@ name: Build vifm zips
 on:
   schedule:
     - cron: '0 0 * * 0' # every Sunday at 00:00 UTC
-  workflow_dispatch: # allows manual trigger
+  workflow_dispatch: # manual trigger
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
       ARCHS: "arm64-v8a armeabi-v7a x86_64 x86"
+      DEB_ARCH_MAP: "arm64-v8a:aarch64,armeabi-v7a:arm,x86_64:x86_64,x86:i686"
 
     steps:
       - name: Checkout repository
@@ -32,8 +33,9 @@ jobs:
         run: |
           mkdir -p build
           for arch in $ARCHS; do
-            # Construct URL
-            url="https://grimler.se/termux-main/pool/main/v/vifm/vifm_${{ steps.get_version.outputs.version }}-1_${arch}.deb"
+            # Map Android ABI → Termux deb architecture
+            deb_arch=$(echo $DEB_ARCH_MAP | tr ',' '\n' | grep "^$arch:" | cut -d':' -f2)
+            url="https://grimler.se/termux-main/pool/main/v/vifm/vifm_${{ steps.get_version.outputs.version }}-1_${deb_arch}.deb"
             echo "Downloading $url"
             curl -L -o build/vifm_${arch}.deb "$url"
 
@@ -41,7 +43,7 @@ jobs:
             mkdir -p build/${arch}
             dpkg-deb -x build/vifm_${arch}.deb build/${arch}/
 
-            # Remove /data/data/com.termux prefix
+            # Remove /data/data/com.termux prefix if present
             if [ -d build/${arch}/data/data/com.termux ]; then
               mv build/${arch}/data/data/com.termux/* build/${arch}/
               rm -rf build/${arch}/data
