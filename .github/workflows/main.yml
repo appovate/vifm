@@ -5,45 +5,6 @@ permissions:
 
 on:
   schedule:
-    - cron: '0 0 * * 0'
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      VIFM_VERSION: 0.14.3
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl xz-utils binutils tar zip dpkg gh
-
-      - name: Set architecture filenames
-        run: |
-          echo "ARM64_DEB=vifm_${VIFM_VERSION}-1_aarch64.deb" >> $GITHUB_ENV
-          echo "ARM_DEB=vifm_${VIFM_VERSION}-1_arm.deb" >> $GITHUB_ENV
-          echo "I686_DEB=vifm_${VIFM_VERSION}-1_i686.deb" >> $GITHUB_ENV
-          echo "X86_64_DEB=vifm_${VIFM_VERSION}-1_x86_64.deb" >> $GITHUB_ENV
-          echo "ARCHS=arm64-v8a armeabi-v7a x86 x86_64" >> $GITHUB_ENV
-
-      - name: Download, extract, and zip per arch
-        run: |
-          declare -A FILEMAP=( ["arm64-v8a"]=$ARM64_DEB ["armeabi-v7a"]=$ARM_DEB ["x86"]=$I686_DEB ["x86_64"]=$X86_64_DEB )
-          mkdir -p build
-          for arch in "${!FILEMAP[@]}"; do
-            debfile="${FILEMAP[$arch]}"
-            url="https://grimler.se/termux-main/pool/main/v/vifm/$debfile"name: Build vifm zips
-
-permissions:
-  contents: write
-
-on:
-  schedule:
     - cron: '0 0 * * 0' # weekly
   workflow_dispatch:
 
@@ -141,50 +102,6 @@ jobs:
               continue
             fi
             gh release create "$tag" "$zipfile" --title "$tag" --notes "Automated release for $tag"
-          done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-            echo "Downloading $url"
-            curl -L -f -o "build/$debfile" "$url" || { echo "Failed to download $debfile"; continue; }
-
-            mkdir -p "build/$arch"
-            dpkg-deb -x "build/$debfile" "build/$arch/"
-
-            if [ ! "$(ls -A build/$arch)" ]; then
-              echo "Extraction failed for $arch, skipping zip..."
-              continue
-            fi
-
-            if [ -d "build/$arch/data/data/com.termux" ]; then
-              mv "build/$arch/data/data/com.termux/"* "build/$arch/"
-              rm -rf "build/$arch/data"
-            fi
-
-            cd "build/$arch"
-            zip -r "../../vifm_${arch}_${VIFM_VERSION}.zip" *
-            cd ../../
-          done
-
-      - name: Create releases for each arch
-        run: |
-          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
-            zipfile="build/vifm_${arch}_${VIFM_VERSION}.zip"
-            echo "Creating release for $arch: $zipfile"
-
-            if [ ! -f "$zipfile" ]; then
-              echo "Zip file $zipfile not found, skipping."
-              continue
-            fi
-
-            if gh release view "v${VIFM_VERSION}-${arch}" >/dev/null 2>&1; then
-              echo "Release v${VIFM_VERSION}-${arch} already exists, skipping."
-              continue
-            fi
-
-            gh release create "v${VIFM_VERSION}-${arch}" "$zipfile" \
-              --title "vifm $VIFM_VERSION ($arch)" \
-              --notes "Automated release of vifm $VIFM_VERSION for $arch"
           done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
