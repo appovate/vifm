@@ -1,19 +1,18 @@
 name: Build vifm zips
 
 permissions:
-  contents: write  # allows creating releases
+  contents: write
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # every Sunday at 00:00 UTC
-  workflow_dispatch: # manual trigger
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      ARCHS: "arm64-v8a armeabi-v7a x86_64 x86"
-      DEB_ARCH_MAP: "arm64-v8a:aarch64,armeabi-v7a:arm,x86_64:x86_64,x86:i686"
+      VIFM_VERSION: 0.14.3
 
     steps:
       - name: Checkout repository
@@ -22,54 +21,55 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq xz-utils binutils tar zip dpkg gh
+          sudo apt-get install -y curl xz-utils binutils tar zip dpkg gh
 
-      - name: Get latest vifm version
-        id: get_version
+      - name: Set architecture filenames
         run: |
-          latest=$(curl -s https://grimler.se/termux-main/pool/main/v/vifm/ | \
-            grep -Po 'vifm_\K[0-9]+\.[0-9]+\.[0-9]+(?=-1_arm\.deb)' | sort -V | tail -1)
-          echo "Latest version: $latest"
-          echo "version=$latest" >> $GITHUB_OUTPUT
-          echo "VIFM_VERSION=$latest" >> $GITHUB_ENV
+          echo "ARM64_DEB=vifm_${VIFM_VERSION}-1_aarch64.deb" >> $GITHUB_ENV
+          echo "ARM_DEB=vifm_${VIFM_VERSION}-1_arm.deb" >> $GITHUB_ENV
+          echo "I686_DEB=vifm_${VIFM_VERSION}-1_i686.deb" >> $GITHUB_ENV
+          echo "X86_64_DEB=vifm_${VIFM_VERSION}-1_x86_64.deb" >> $GITHUB_ENV
+          echo "ARCHS=arm64-v8a armeabi-v7a x86 x86_64" >> $GITHUB_ENV
 
       - name: Download, extract, and zip per arch
         run: |
+          declare -A FILEMAP=( ["arm64-v8a"]=$ARM64_DEB ["armeabi-v7a"]=$ARM_DEB ["x86"]=$I686_DEB ["x86_64"]=$X86_64_DEB )
           mkdir -p build
-          for arch in $ARCHS; do
-            deb_arch=$(echo $DEB_ARCH_MAP | tr ',' '\n' | grep "^$arch:" | cut -d':' -f2)
-            url="https://grimler.se/termux-main/pool/main/v/vifm/vifm_${VIFM_VERSION}-1_${deb_arch}.deb"
+          for arch in "${!FILEMAP[@]}"; do
+            debfile="${FILEMAP[$arch]}"
+            url="https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
             echo "Downloading $url"
-            curl -L -o "build/vifm_${arch}.deb" "$url"
+            curl -L -f -o "build/$debfile" "$url" || { echo "Failed to download $debfile"; continue; }
 
-            mkdir -p "build/${arch}"
-            dpkg-deb -x "build/vifm_${arch}.deb" "build/${arch}/"
+            mkdir -p "build/$arch"
+            dpkg-deb -x "build/$debfile" "build/$arch/"
 
-            # Remove /data/data/com.termux prefix if present
-            if [ -d "build/${arch}/data/data/com.termux" ]; then
-              mv "build/${arch}/data/data/com.termux/"* "build/${arch}/"
-              rm -rf "build/${arch}/data"
+            if [ ! "$(ls -A build/$arch)" ]; then
+              echo "Extraction failed for $arch, skipping zip..."
+              continue
             fi
 
-            # Zip the folder
-            cd "build/${arch}"
+            if [ -d "build/$arch/data/data/com.termux" ]; then
+              mv "build/$arch/data/data/com.termux/"* "build/$arch/"
+              rm -rf "build/$arch/data"
+            fi
+
+            cd "build/$arch"
             zip -r "../../vifm_${arch}_${VIFM_VERSION}.zip" *
             cd ../../
           done
 
       - name: Create releases for each arch
         run: |
-          for arch in $ARCHS; do
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
             zipfile="build/vifm_${arch}_${VIFM_VERSION}.zip"
             echo "Creating release for $arch: $zipfile"
 
-            # Skip if zip file doesn't exist
             if [ ! -f "$zipfile" ]; then
               echo "Zip file $zipfile not found, skipping."
               continue
             fi
 
-            # Skip if release already exists
             if gh release view "v${VIFM_VERSION}-${arch}" >/dev/null 2>&1; then
               echo "Release v${VIFM_VERSION}-${arch} already exists, skipping."
               continue
