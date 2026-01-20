@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq xz-utils binutils tar zip dpkg
+          sudo apt-get install -y curl jq xz-utils binutils tar zip dpkg gh
 
       - name: Get latest vifm version
         id: get_version
@@ -31,37 +31,48 @@ jobs:
             grep -Po 'vifm_\K[0-9]+\.[0-9]+\.[0-9]+(?=-1_arm\.deb)' | sort -V | tail -1)
           echo "Latest version: $latest"
           echo "version=$latest" >> $GITHUB_OUTPUT
+          echo "VIFM_VERSION=$latest" >> $GITHUB_ENV
 
       - name: Download, extract, and zip per arch
         run: |
           mkdir -p build
           for arch in $ARCHS; do
+            # Map Android ABI → Termux deb architecture
             deb_arch=$(echo $DEB_ARCH_MAP | tr ',' '\n' | grep "^$arch:" | cut -d':' -f2)
-            url="https://grimler.se/termux-main/pool/main/v/vifm/vifm_${{ steps.get_version.outputs.version }}-1_${deb_arch}.deb"
+            url="https://grimler.se/termux-main/pool/main/v/vifm/vifm_${VIFM_VERSION}-1_${deb_arch}.deb"
             echo "Downloading $url"
             curl -L -o build/vifm_${arch}.deb "$url"
 
             mkdir -p build/${arch}
             dpkg-deb -x build/vifm_${arch}.deb build/${arch}/
 
+            # Remove /data/data/com.termux prefix if present
             if [ -d build/${arch}/data/data/com.termux ]; then
               mv build/${arch}/data/data/com.termux/* build/${arch}/
               rm -rf build/${arch}/data
             fi
 
+            # Zip the folder
             cd build/${arch}
-            zip -r ../../vifm_${arch}_${{ steps.get_version.outputs.version }}.zip *
+            zip -r ../../vifm_${arch}_${VIFM_VERSION}.zip *
             cd ../../
           done
 
       - name: Create releases for each arch
         run: |
           for arch in $ARCHS; do
-            zipfile="build/vifm_${arch}_${{ steps.get_version.outputs.version }}.zip"
-            echo "Creating release for $arch"
-            gh release create "v${{ steps.get_version.outputs.version }}-${arch}" "$zipfile" \
-              --title "vifm ${{ steps.get_version.outputs.version }} ($arch)" \
-              --notes "Automated release of vifm ${{ steps.get_version.outputs.version }} for $arch"
+            zipfile="build/vifm_${arch}_${VIFM_VERSION}.zip"
+            echo "Creating release for $arch: $zipfile"
+
+            # Skip if release already exists
+            if gh release view "v${VIFM_VERSION}-${arch}" >/dev/null 2>&1; then
+              echo "Release v${VIFM_VERSION}-${arch} already exists, skipping."
+              continue
+            fi
+
+            gh release create "v${VIFM_VERSION}-${arch}" "$zipfile" \
+              --title "vifm $VIFM_VERSION ($arch)" \
+              --notes "Automated release of vifm $VIFM_VERSION for $arch"
           done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
