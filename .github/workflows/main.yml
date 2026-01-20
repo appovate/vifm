@@ -1,8 +1,7 @@
 name: Build vifm zips
 
 permissions:
-  contents: write
-
+  contents: write  # allows creating releases
 
 on:
   schedule:
@@ -23,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq xz-utils binutils tar zip
+          sudo apt-get install -y curl jq xz-utils binutils tar zip dpkg
 
       - name: Get latest vifm version
         id: get_version
@@ -33,38 +32,36 @@ jobs:
           echo "Latest version: $latest"
           echo "version=$latest" >> $GITHUB_OUTPUT
 
-      - name: Download and prepare packages
+      - name: Download, extract, and zip per arch
         run: |
           mkdir -p build
           for arch in $ARCHS; do
-            # Map Android ABI → Termux deb architecture
             deb_arch=$(echo $DEB_ARCH_MAP | tr ',' '\n' | grep "^$arch:" | cut -d':' -f2)
             url="https://grimler.se/termux-main/pool/main/v/vifm/vifm_${{ steps.get_version.outputs.version }}-1_${deb_arch}.deb"
             echo "Downloading $url"
             curl -L -o build/vifm_${arch}.deb "$url"
 
-            # Extract .deb
             mkdir -p build/${arch}
             dpkg-deb -x build/vifm_${arch}.deb build/${arch}/
 
-            # Remove /data/data/com.termux prefix if present
             if [ -d build/${arch}/data/data/com.termux ]; then
               mv build/${arch}/data/data/com.termux/* build/${arch}/
               rm -rf build/${arch}/data
             fi
 
-            # Zip the folder
             cd build/${arch}
             zip -r ../../vifm_${arch}_${{ steps.get_version.outputs.version }}.zip *
             cd ../../
           done
 
-      - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: "v${{ steps.get_version.outputs.version }}"
-          release_name: "vifm ${{ steps.get_version.outputs.version }}"
-          body: "Automated release of vifm version ${{ steps.get_version.outputs.version }}"
-          files: build/*.zip
-          draft: false
-          prerelease: false
+      - name: Create releases for each arch
+        run: |
+          for arch in $ARCHS; do
+            zipfile="build/vifm_${arch}_${{ steps.get_version.outputs.version }}.zip"
+            echo "Creating release for $arch"
+            gh release create "v${{ steps.get_version.outputs.version }}-${arch}" "$zipfile" \
+              --title "vifm ${{ steps.get_version.outputs.version }} ($arch)" \
+              --notes "Automated release of vifm ${{ steps.get_version.outputs.version }} for $arch"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
