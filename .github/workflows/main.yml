@@ -2,7 +2,7 @@ name: Update Vifm (Release)
 
 on:
   schedule:
-    - cron: "0 0 * * 0"   # every Sunday at midnight UTC
+    - cron: "0 0 * * 0"
   workflow_dispatch:
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
       - name: Install required tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget dpkg-dev zip
+          sudo apt-get install -y wget dpkg-dev rsync zip
 
       - name: Detect latest Vifm version
         id: get_version
@@ -32,12 +32,13 @@ jobs:
 
           FILE=$(cat latest.txt)
           VERSION=$(echo "$FILE" | sed -E 's/vifm_([^_]*)_.*/\1/')
-
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Download, extract, and zip vifm binaries
+      - name: Download, normalize paths, and zip per-ABI
         run: |
           BASE_URL="https://grimler.se/termux-packages-24/pool/main/v/vifm/"
+          VERSION="${{ steps.get_version.outputs.version }}"
+
           declare -A archs=(
             [aarch64]=aarch64
             [arm]=arm
@@ -45,19 +46,26 @@ jobs:
             [x86_64]=x86_64
           )
 
-          rm -rf dist
-          mkdir -p dist
+          rm -rf dist work
+          mkdir -p dist work
 
           for arch in "${!archs[@]}"; do
-            FILE="vifm_${{ steps.get_version.outputs.version }}_${arch}.deb"
-            echo "Downloading $FILE"
-            wget -q "$BASE_URL$FILE" -O "$FILE"
+            DEB="vifm_${VERSION}_${arch}.deb"
+            echo "Downloading $DEB"
+            wget -q "$BASE_URL$DEB" -O "$DEB"
 
-            mkdir -p "dist/vifm-$arch"
-            dpkg-deb -x "$FILE" "dist/vifm-$arch"
+            # Extract deb
+            mkdir -p "work/$arch"
+            dpkg-deb -x "$DEB" "work/$arch"
 
+            # Create clean layout: usr/...
+            mkdir -p "dist/vifm-$arch/usr"
+            rsync -a "work/$arch/data/data/com.termux/files/usr/" \
+                     "dist/vifm-$arch/usr/"
+
+            # Zip per architecture
             cd dist
-            zip -qr "vifm-${{ steps.get_version.outputs.version }}-$arch.zip" "vifm-$arch"
+            zip -qr "vifm-${VERSION}-${arch}.zip" "vifm-$arch"
             cd ..
           done
 
@@ -67,7 +75,11 @@ jobs:
           tag_name: vifm-${{ steps.get_version.outputs.version }}
           name: Vifm ${{ steps.get_version.outputs.version }}
           body: |
-            Automated Vifm release built from Termux packages.
+            Vifm binaries built from Termux packages.
+
+            Path normalization applied:
+            - Removed /data/data/com.termux/files
+            - Root starts at /usr
 
             Included architectures:
             - aarch64
