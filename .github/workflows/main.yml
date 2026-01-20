@@ -9,5 +9,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      ARCHS:
+      ARCHS: "arm64 armeabi-v7a x86_64 x86"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/ checkout@v3
+        
     
