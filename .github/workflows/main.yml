@@ -1,124 +1,77 @@
-name: Build vifm zips
-
-permissions:
-  contents: write
+name: Update Vifm (Release)
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # weekly
+    - cron: "0 0 * * 0"   # every Sunday at midnight UTC
   workflow_dispatch:
 
 jobs:
-  build:
+  release-vifm:
     runs-on: ubuntu-latest
-    env:
-      VIFM_VERSION: 0.14.3
+
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install required tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl xz-utils binutils tar zip dpkg gh
+          sudo apt-get install -y wget dpkg-dev zip
 
-      - name: Build arm64-v8a
+      - name: Detect latest Vifm version
+        id: get_version
         run: |
-          debfile="vifm_${VIFM_VERSION}-1_aarch64.deb"
-          folder="${debfile%.deb}"
-          mkdir -p "build/$folder"
-          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
-          dpkg-deb -x "build/$debfile" "build/$folder/"
+          BASE_URL="https://grimler.se/termux-packages-24/pool/main/v/vifm/"
+          wget -qO- "$BASE_URL" \
+            | grep -o 'vifm_[^"]*_aarch64.deb' \
+            | sort -V \
+            | tail -n1 > latest.txt
 
-          if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv build/$folder/data/data/com.termux/* build/$folder/
-            rm -rf build/$folder/data
-          fi
+          FILE=$(cat latest.txt)
+          VERSION=$(echo "$FILE" | sed -E 's/vifm_([^_]*)_.*/\1/')
 
-          cd "build/$folder"
-          zip -r "../../${folder}.zip" *
-          cd ../../
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build armeabi-v7a
+      - name: Download, extract, and zip vifm binaries
         run: |
-          debfile="vifm_${VIFM_VERSION}-1_arm.deb"
-          folder="${debfile%.deb}"
-          mkdir -p "build/$folder"
-          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
-          dpkg-deb -x "build/$debfile" "build/$folder/"
-
-          if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv build/$folder/data/data/com.termux/* build/$folder/
-            rm -rf build/$folder/data
-          fi
-
-          cd "build/$folder"
-          zip -r "../../${folder}.zip" *
-          cd ../../
-
-      - name: Build x86
-        run: |
-          debfile="vifm_${VIFM_VERSION}-1_i686.deb"
-          folder="${debfile%.deb}"
-          mkdir -p "build/$folder"
-          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
-          dpkg-deb -x "build/$debfile" "build/$folder/"
-
-          if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv build/$folder/data/data/com.termux/* build/$folder/
-            rm -rf build/$folder/data
-          fi
-
-          cd "build/$folder"
-          zip -r "../../${folder}.zip" *
-          cd ../../
-
-      - name: Build x86_64
-        run: |
-          debfile="vifm_${VIFM_VERSION}-1_x86_64.deb"
-          folder="${debfile%.deb}"
-          mkdir -p "build/$folder"
-          curl -L -f -o "build/$debfile" "https://grimler.se/termux-main/pool/main/v/vifm/$debfile"
-          dpkg-deb -x "build/$debfile" "build/$folder/"
-
-          if [ -d "build/$folder/data/data/com.termux" ]; then
-            mv build/$folder/data/data/com.termux/* build/$folder/
-            rm -rf build/$folder/data
-          fi
-
-          cd "build/$folder"
-          zip -r "../../${folder}.zip" *
-          cd ../../
-
-      - name: Create releases
-        run: |
-          # Explicit list of zip files
-          zipfiles=(
-            "build/vifm_${VIFM_VERSION}-1_aarch64.zip"
-            "build/vifm_${VIFM_VERSION}-1_arm.zip"
-            "build/vifm_${VIFM_VERSION}-1_i686.zip"
-            "build/vifm_${VIFM_VERSION}-1_x86_64.zip"
+          BASE_URL="https://grimler.se/termux-packages-24/pool/main/v/vifm/"
+          declare -A archs=(
+            [aarch64]=aarch64
+            [arm]=arm
+            [i686]=i686
+            [x86_64]=x86_64
           )
 
-          for zipfile in "${zipfiles[@]}"; do
-            echo "Creating release for $zipfile"
+          rm -rf dist
+          mkdir -p dist
 
-            if [ ! -f "$zipfile" ]; then
-              echo "Zip file $zipfile not found, skipping."
-              continue
-            fi
+          for arch in "${!archs[@]}"; do
+            FILE="vifm_${{ steps.get_version.outputs.version }}_${arch}.deb"
+            echo "Downloading $FILE"
+            wget -q "$BASE_URL$FILE" -O "$FILE"
 
-            tag=$(basename "$zipfile" .zip)
+            mkdir -p "dist/vifm-$arch"
+            dpkg-deb -x "$FILE" "dist/vifm-$arch"
 
-            if gh release view "$tag" >/dev/null 2>&1; then
-              echo "Release $tag already exists, skipping."
-              continue
-            fi
-
-            gh release create "$tag" "$zipfile" \
-              --title "$tag" \
-              --notes "Automated release for $tag"
+            cd dist
+            zip -qr "vifm-${{ steps.get_version.outputs.version }}-$arch.zip" "vifm-$arch"
+            cd ..
           done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: vifm-${{ steps.get_version.outputs.version }}
+          name: Vifm ${{ steps.get_version.outputs.version }}
+          body: |
+            Automated Vifm release built from Termux packages.
+
+            Included architectures:
+            - aarch64
+            - arm
+            - i686
+            - x86_64
+          files: dist/*.zip
